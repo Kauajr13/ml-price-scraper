@@ -71,7 +71,10 @@ class MLScraper:
             url_el = item.select_one("a.poly-component__title, h2.poly-box a")
             url = url_el["href"].split("?")[0] if url_el and url_el.get("href") else ""
 
-            price_el = item.select_one("span.andes-money-amount__fraction")
+            # preço atual fica dentro de poly-price__current
+            price_el = item.select_one("div.poly-price__current span.andes-money-amount__fraction")
+            if not price_el:
+                price_el = item.select_one("span.andes-money-amount__fraction")
             price = self._parse_price(price_el.get_text() if price_el else "")
             if price is None:
                 return None
@@ -83,13 +86,15 @@ class MLScraper:
             discount_pct = None
             if discount_el:
                 try:
-                    discount_pct = float(
-                        discount_el.get_text(strip=True).replace("%", "").replace("-", "")
-                    )
-                except ValueError:
+                    # texto pode ser "32% OFF no Pix" ou "-32%"
+                    raw = discount_el.get_text(strip=True)
+                    number = raw.split("%")[0].replace("-", "").strip()
+                    discount_pct = float(number)
+                except (ValueError, IndexError):
                     pass
 
-            rating_el = item.select_one("span.poly-reviews__rating")
+            # rating fica em poly-component__review-compacted > span.poly-phrase-label
+            rating_el = item.select_one("span.poly-component__review-compacted span.poly-phrase-label")
             rating = None
             if rating_el:
                 try:
@@ -97,21 +102,29 @@ class MLScraper:
                 except ValueError:
                     pass
 
-            reviews_el = item.select_one("span.poly-reviews__total")
+            # reviews ficam como "(312)" dentro do review-compacted, após o rating
             reviews_count = None
-            if reviews_el:
-                try:
-                    reviews_count = int(reviews_el.get_text(strip=True).strip("()").replace(".", ""))
-                except ValueError:
-                    pass
+            review_block = item.select_one("span.poly-component__review-compacted")
+            if review_block:
+                labels = review_block.select("span.poly-phrase-label")
+                # segundo label costuma ser o total entre parênteses
+                for label in labels[1:]:
+                    txt = label.get_text(strip=True).strip("()")
+                    try:
+                        reviews_count = int(txt.replace(".", "").replace(",", ""))
+                        break
+                    except ValueError:
+                        continue
 
             sold_el = item.select_one("span.poly-component__sold")
             sold_count = sold_el.get_text(strip=True) if sold_el else None
 
-            shipping_el = item.select_one("span.poly-component__shipping")
-            shipping_free = bool(
-                shipping_el and "grátis" in shipping_el.get_text(strip=True).lower()
-            )
+            # frete fica em div.poly-component__shipping > span (filho direto)
+            shipping_free = False
+            shipping_div = item.select_one("div.poly-component__shipping")
+            if shipping_div:
+                shipping_text = shipping_div.get_text(strip=True).lower()
+                shipping_free = "grátis" in shipping_text or "gratis" in shipping_text
 
             cond_el = item.select_one("span.poly-component__condition")
             condition = cond_el.get_text(strip=True) if cond_el else "Novo"
